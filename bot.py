@@ -1,44 +1,40 @@
 import os
-import requests
+import asyncio
 from telegram import Update
-from telegram.ext import Application, MessageHandler, CommandHandler, ContextTypes, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from shazamio import Shazam
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-AUDD_TOKEN = os.getenv("AUDD_TOKEN")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🎵 ARTIST UZ botiga xush kelibsiz!\n\n"
-        "Musiqa yoki video yuboring. Qo‘shiq nomini topib beraman."
+        "🎵 ARTIST UZ ga xush kelibsiz!\n\n"
+        "Musiqa, ovozli xabar yoki video yuboring — qo‘shiqni topaman."
     )
 
 async def music(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
-    file = await msg.effective_attachment.get_file()
+    media = msg.audio or msg.voice or msg.video or msg.document
+
+    if not media:
+        return
+
+    file = await context.bot.get_file(media.file_id)
     path = "music_file"
     await file.download_to_drive(path)
 
     try:
-        with open(path, "rb") as audio:
-            response = requests.post(
-                "https://api.audd.io/",
-                data={"api_token": AUDD_TOKEN, "return": "spotify,apple_music"},
-                files={"file": audio},
-                timeout=60
-            ).json()
+        shazam = Shazam()
+        result = await shazam.recognize(path)
+        track = result.get("track")
 
-        result = response.get("result")
-
-        if result:
-            text = (
-                f"🎵 Qo‘shiq: {result.get('title')}\n"
-                f"🎤 Ijrochi: {result.get('artist')}\n"
-                f"💿 Albom: {result.get('album') or 'Noma’lum'}"
+        if track:
+            await msg.reply_text(
+                f"🎵 Qo‘shiq: {track.get('title')}\n"
+                f"🎤 Ijrochi: {track.get('subtitle')}"
             )
-            await msg.reply_text(text)
         else:
-            await msg.reply_text("😔 Musiqa topilmadi. Boshqa parcha yuboring.")
-
+            await msg.reply_text("😔 Qo‘shiq topilmadi.")
     except Exception:
         await msg.reply_text("Xatolik yuz berdi. Qayta urinib ko‘ring.")
     finally:
@@ -47,5 +43,5 @@ async def music(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 app = Application.builder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.AUDIO | filters.VOICE | filters.VIDEO | filters.Document.AUDIO, music))
+app.add_handler(MessageHandler(filters.AUDIO | filters.VOICE | filters.VIDEO | filters.Document.ALL, music))
 app.run_polling()
